@@ -1,8 +1,7 @@
-# Linux-IPC-Shared-memory
-Ex06-Linux IPC-Shared-memory
-
+# Linux-File-IO-Systems-locking
+Ex07-Linux File-IO Systems-locking
 # AIM:
-To Write a C program that illustrates two processes communicating using shared memory.
+To Write a C program that illustrates files copying and locking
 
 # DESIGN STEPS:
 
@@ -12,7 +11,7 @@ Navigate to any Linux environment installed on the system or installed inside a 
 
 ### Step 2:
 
-Write the C Program using Linux Process API - Shared Memory
+Write the C Program using Linux IO Systems locking
 
 ### Step 3:
 
@@ -20,122 +19,142 @@ Execute the C Program for the desired output.
 
 # PROGRAM:
 
-## Write a C program that illustrates two processes communicating using shared memory.
+## 1.To Write a C program that illustrates files copying 
 
-// C program that illustrates two processes communicating using shared memory
+
+```
+#include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <source_file> <destination_file>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    char block[1024];
+    int in, out;
+    ssize_t nread;
+
+    in = open(argv[1], O_RDONLY);
+    if (in == -1) {
+        perror("Error opening source file");
+        exit(EXIT_FAILURE);
+    }
+
+    out = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (out == -1) {
+        perror("Error opening destination file");
+        close(in);
+        exit(EXIT_FAILURE);
+    }
+
+    while ((nread = read(in, block, sizeof(block))) > 0) {
+        if (write(out, block, nread) != nread) {
+            perror("Error writing to destination file");
+            close(in);
+            close(out);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (nread == -1) {
+        perror("Error reading source file");
+    }
+
+    close(in);
+    close(out);
+    return EXIT_SUCCESS;
+}
+```
+## OUTPUT
+
+<img width="533" height="313" alt="Screenshot 2025-11-06 134804" src="https://github.com/user-attachments/assets/5e5e4f88-df32-40fe-b30b-97005a9be2f8" />
+
+
+## 2.To Write a C program that illustrates files locking
+
+```
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <sys/shm.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <sys/file.h>
 
-#define TEXT_SZ 2048  // Shared memory size
-
-struct shared_use_st {
-    int written;  
-    char some_text[TEXT_SZ];
-};
-
-int main() {
-    int shmid;
-    void *shared_memory = (void *)0;
-    struct shared_use_st *shared_stuff;
-
-    // Create shared memory
-    shmid = shmget((key_t)1234, sizeof(struct shared_use_st), 0666 | IPC_CREAT);
-    if (shmid == -1) {
-        fprintf(stderr, "shmget failed\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    // Print the shared memory ID in a predictable format
-    printf("Shared memory id = %d\n", shmid);
-    
-    // Attach to shared memory
-    shared_memory = shmat(shmid, (void *)0, 0);
-    if (shared_memory == (void *)-1) {
-        fprintf(stderr, "shmat failed\n");
-        exit(EXIT_FAILURE);
-    }
-    printf("Memory attached at %p\n", shared_memory);
-    
-    shared_stuff = (struct shared_use_st *)shared_memory;
-    shared_stuff->written = 0;
-
-    pid_t pid = fork();
-    
-    if (pid < 0) {
-        fprintf(stderr, "Fork failed\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid == 0) {  // Child process (Consumer)
-        while (1) {
-            while (shared_stuff->written == 0) {
-                sleep(1); // Wait for producer
-            }
-
-            printf("Consumer received: %s", shared_stuff->some_text);
-
-            if (strncmp(shared_stuff->some_text, "end", 3) == 0) {
-                break;
-            }
-
-            shared_stuff->written = 0; // Reset for producer
-        }
-
-        // Detach shared memory
-        if (shmdt(shared_memory) == -1) {
-            fprintf(stderr, "shmdt failed\n");
-            exit(EXIT_FAILURE);
-        }
-        exit(EXIT_SUCCESS);
-    } else {  // Parent process (Producer)
-        char buffer[TEXT_SZ];
-
-        while (1) {
-            printf("Enter Some Text: ");
-            fgets(buffer, TEXT_SZ, stdin);
-
-            strncpy(shared_stuff->some_text, buffer, TEXT_SZ);
-            shared_stuff->written = 1;
-            printf("%s", shared_stuff->some_text);
-
-            if (strncmp(buffer, "end", 3) == 0) {
-                break;
-            }
-
-            while (shared_stuff->written == 1) {
-                sleep(1); // Wait for consumer
-            }
-        }
-
-        // Wait for child process (consumer) to finish
-        wait(NULL);
-
-        // Detach and remove shared memory
-        if (shmdt(shared_memory) == -1) {
-            fprintf(stderr, "shmdt failed\n");
-            exit(EXIT_FAILURE);
-        }
-        
-        if (shmctl(shmid, IPC_RMID, 0) == -1) {
-            fprintf(stderr, "shmctl failed\n");
-            exit(EXIT_FAILURE);
-        }
-
-        exit(EXIT_SUCCESS);
-    }
+void display_lslocks() {
+    printf("\nCurrent `lslocks` output:\n");
+    fflush(stdout);
+    system("lslocks");
 }
 
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    char *file = argv[1];
+    int fd;
+
+    printf("Opening %s\n", file);
+
+    fd = open(file, O_WRONLY);
+    if (fd == -1) {
+        perror("Error opening file");
+        exit(EXIT_FAILURE);
+    }
+
+    // Acquire shared lock
+    if (flock(fd, LOCK_SH) == -1) {
+        perror("Error acquiring shared lock");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+    printf("Acquired shared lock using flock\n");
+    display_lslocks();
+
+    sleep(1); // Simulate waiting before upgrading
+
+    // Try to upgrade to exclusive lock (non-blocking)
+    if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+        perror("Error upgrading to exclusive lock");
+        flock(fd, LOCK_UN); // Release shared lock if upgrade fails
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+    printf("Acquired exclusive lock using flock\n");
+    display_lslocks();
+
+    sleep(1); // Simulate waiting before unlocking
+
+    // Release lock
+    if (flock(fd, LOCK_UN) == -1) {
+        perror("Error unlocking");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+    printf("Unlocked\n");
+    display_lslocks();
+
+    close(fd);
+    return 0;
+}
+
+```
 
 
 ## OUTPUT
 
-<img width="1626" height="1027" alt="image" src="https://github.com/user-attachments/assets/e9a5c01d-054a-47ba-830e-18ad7b146809" />
+<img width="1651" height="994" alt="Screenshot 2025-11-06 135217" src="https://github.com/user-attachments/assets/0c42d383-b477-42c2-8943-17a8c4ab5c9c" />
+
+<img width="1229" height="458" alt="Screenshot 2025-11-06 135239" src="https://github.com/user-attachments/assets/c965c126-eeb0-4f66-9c1b-c699fe1a3c2e" />
+
+
+
 
 
 # RESULT:
-The program is executed successfully.
+The programs are executed successfully.
