@@ -1,6 +1,8 @@
-# Ex07-Linux-File-IO-Systems-locking
+# Linux-IPC-Shared-memory
+Ex06-Linux IPC-Shared-memory
+
 # AIM:
-To Write a C program that illustrates files copying and locking
+To Write a C program that illustrates two processes communicating using shared memory.
 
 # DESIGN STEPS:
 
@@ -10,7 +12,7 @@ Navigate to any Linux environment installed on the system or installed inside a 
 
 ### Step 2:
 
-Write the C Program using Linux IO Systems locking
+Write the C Program using Linux Process API - Shared Memory
 
 ### Step 3:
 
@@ -18,95 +20,122 @@ Execute the C Program for the desired output.
 
 # PROGRAM:
 
-## 1.To Write a C program that illustrates files copying 
-```c
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <stdio.h> // Include stdio.h for perror()
+## Write a C program that illustrates two processes communicating using shared memory.
 
-int main() {
-    char block[1024];
-    int in, out;
-    int nread;
-
-    in = open("filecopy.c", O_RDONLY);
-
-    out = open("file.out", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-
-    exit(EXIT_SUCCESS);
-}
-
-```
-
-## 2.To Write a C program that illustrates files locking
-```c
-#include <fcntl.h>
+// C program that illustrates two processes communicating using shared memory
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/file.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
-int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        printf("Usage: %s <filename>\n", argv[0]);
-        return 1;
+#define TEXT_SZ 2048  // Shared memory size
+
+struct shared_use_st {
+    int written;  
+    char some_text[TEXT_SZ];
+};
+
+int main() {
+    int shmid;
+    void *shared_memory = (void *)0;
+    struct shared_use_st *shared_stuff;
+
+    // Create shared memory
+    shmid = shmget((key_t)1234, sizeof(struct shared_use_st), 0666 | IPC_CREAT);
+    if (shmid == -1) {
+        fprintf(stderr, "shmget failed\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Print the shared memory ID in a predictable format
+    printf("Shared memory id = %d\n", shmid);
+    
+    // Attach to shared memory
+    shared_memory = shmat(shmid, (void *)0, 0);
+    if (shared_memory == (void *)-1) {
+        fprintf(stderr, "shmat failed\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("Memory attached at %p\n", shared_memory);
+    
+    shared_stuff = (struct shared_use_st *)shared_memory;
+    shared_stuff->written = 0;
+
+    pid_t pid = fork();
+    
+    if (pid < 0) {
+        fprintf(stderr, "Fork failed\n");
+        exit(EXIT_FAILURE);
     }
 
-    char* file = argv[1];
-    int fd;
-    struct flock lock;
+    if (pid == 0) {  // Child process (Consumer)
+        while (1) {
+            while (shared_stuff->written == 0) {
+                sleep(1); // Wait for producer
+            }
 
-    printf("Opening %s\n", file);
+            printf("Consumer received: %s", shared_stuff->some_text);
 
-    // Open the file with read-write permissions
-    fd = open(file, O_RDWR);
-    if (fd == -1) {
-        perror("Error opening file");
-        return 1;
+            if (strncmp(shared_stuff->some_text, "end", 3) == 0) {
+                break;
+            }
+
+            shared_stuff->written = 0; // Reset for producer
+        }
+
+        // Detach shared memory
+        if (shmdt(shared_memory) == -1) {
+            fprintf(stderr, "shmdt failed\n");
+            exit(EXIT_FAILURE);
+        }
+        exit(EXIT_SUCCESS);
+    } else {  // Parent process (Producer)
+        char buffer[TEXT_SZ];
+
+        while (1) {
+            printf("Enter Some Text: ");
+            fgets(buffer, TEXT_SZ, stdin);
+
+            strncpy(shared_stuff->some_text, buffer, TEXT_SZ);
+            shared_stuff->written = 1;
+            printf("%s", shared_stuff->some_text);
+
+            if (strncmp(buffer, "end", 3) == 0) {
+                break;
+            }
+
+            while (shared_stuff->written == 1) {
+                sleep(1); // Wait for consumer
+            }
+        }
+
+        // Wait for child process (consumer) to finish
+        wait(NULL);
+
+        // Detach and remove shared memory
+        if (shmdt(shared_memory) == -1) {
+            fprintf(stderr, "shmdt failed\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        if (shmctl(shmid, IPC_RMID, 0) == -1) {
+            fprintf(stderr, "shmctl failed\n");
+            exit(EXIT_FAILURE);
+        }
+
+        exit(EXIT_SUCCESS);
     }
-
-    // Acquire shared lock
-    lock.l_type = F_RDLCK; // Shared lock
-    lock.l_whence = SEEK_SET;
-    lock.l_start = 0;
-    lock.l_len = 0;
-    if (fcntl(fd, F_SETLK, &lock) == -1) {
-        perror("Error acquiring shared lock");
-    } else {
-        printf("Acquiring shared lock using fcntl\n");
-    }
-    getchar();
-
-    // Upgrade to exclusive lock
-    lock.l_type = F_WRLCK; // Exclusive lock
-    if (fcntl(fd, F_SETLK, &lock) == -1) {
-        perror("Error acquiring exclusive lock");
-    } else {
-        printf("Acquiring exclusive lock using fcntl\n");
-    }
-    getchar();
-
-    // Release lock
-    lock.l_type = F_UNLCK;
-    if (fcntl(fd, F_SETLK, &lock) == -1) {
-        perror("Error releasing lock");
-    } else {
-        printf("Unlocking\n");
-    }
-    getchar();
-
-    close(fd);
-    return 0;
 }
 
-```
-# OUTPUT:
-## C program that illustrates files copying:
-![image](https://github.com/samisrael/Linux-File-IO-Systems-locking/assets/118707037/9677c09d-1110-4a49-9ced-bc4238661f29)
 
-## C program that illustrates files locking:
-![323158503-2de40eb8-7564-4cb7-a3d3-af3e5d1955d3](https://github.com/dharshan7200/Linux-File-IO-Systems-locking/assets/138850116/492447d9-9326-4be7-a4d2-4166740cc49c)
+
+## OUTPUT
+
+<img width="1626" height="1027" alt="image" src="https://github.com/user-attachments/assets/e9a5c01d-054a-47ba-830e-18ad7b146809" />
+
 
 # RESULT:
-The programs are executed successfully.
+The program is executed successfully.
